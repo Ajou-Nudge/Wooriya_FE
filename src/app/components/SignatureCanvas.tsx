@@ -1,5 +1,12 @@
 "use client"
 import React, { useRef, useState, useEffect } from 'react';
+import { S3 } from "aws-sdk";
+
+const s3 = new S3({
+  accessKeyId: process.env.NEXT_PUBLIC_S3_ACCESS_KEY_ID,
+  secretAccessKey: process.env.NEXT_PUBLIC_S3_SECRET_ACCESS_KEY,
+  region: process.env.NEXT_PUBLIC_S3_REGION,
+});
 
 function SignatureCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,24 +52,24 @@ function SignatureCanvas() {
   const getPosition = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
-
+  
     const rect = canvas.getBoundingClientRect();
-    let clientX: number, clientY: number;
+    let ClientX: number|undefined, ClientY: number|undefined;
 
     if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
+      ClientX = e.touches[0].clientX;
+      ClientY = e.touches[0].clientY;
     } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
+      ClientX = e.clientX;
+      ClientY = e.clientY;
     }
 
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
     // 화면 좌표를 캔버스 좌표로 변환
-    const x = crispPixel((clientX - rect.left) * scaleX);
-    const y = crispPixel((clientY - rect.top) * scaleY);
+    const x = crispPixel((ClientX - rect.left) * scaleX);
+    const y = crispPixel((ClientY - rect.top) * scaleY);
     return { x, y };
   };
 
@@ -123,19 +130,45 @@ function SignatureCanvas() {
     }
   };
 
-  const handleConfirmSave = () => {
-    if (drawnImageURL) {
-      const link = document.createElement('a');
-      link.href = drawnImageURL;
-      link.download = 'image.png';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+  const handleConfirmSave = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
+    // Data URL을 Blob으로 변환
+    const response = await fetch(drawnImageURL);
+    const blob = await response.blob();
+    console.log("1")
+    // S3 업로드
+    const params = {
+      Bucket: "nudge.wooriya.sign", // 버킷 이름으로 수정
+      Key: `signature_${Date.now()}.png`, // 파일 이름 설정
+      Body: blob,
+    };
+    console.log("2")
+    try {
+      console.log("3")
+      const upload = s3.upload(params);
+      await upload.promise();
+      console.log("Image uploaded successfully");
+
+      // 업로드된 이미지의 URL 생성
+      const imageUrl = s3.getSignedUrl("getObject", {
+        Bucket: params.Bucket,
+        Key: params.Key,
+      });
+
+      setDrawnImageURL(imageUrl); // drawnImageURL 업데이트
+      console.log("imageUrl: " + imageUrl)
+    } catch (err) {
+      console.error(err);
     }
 
+    // 그림 초기화 및 상태 초기화
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
     setShowConfirmation(false);
-    setDrawnImageURL('');
   };
 
   const handleCancelSave = () => {
